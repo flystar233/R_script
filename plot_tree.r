@@ -1,5 +1,6 @@
 library(data.tree)
 library(randomForest)
+library(ranger)
 collapse <- function(x){
     x<-sub(" ","_",x)
     
@@ -35,14 +36,42 @@ build_tree <- function(df) {
     # 返回根节点
     return(nodes[[1]])
 }
+main <-function(tree,tree_from="ranger"){
+    if (tree_from=="ranger"){
+        tree_data<- data.frame("left_daughter" = tree$leftChild+1,
+                    "right_daughter" = tree$rightChild+1,
+                    "split_var" = tree$splitvarName,
+                    "split_point" = tree$splitval,
+                    "status"=ifelse(tree$terminal, -1, 1),
+                    "prediction"=tree$prediction)
 
-# test 
-tree <-getTree(randomForest(iris[,-5], iris[,5], ntree=10), 3, labelVar=TRUE)
-root <- build_tree(tree)
-
-SetGraphStyle(root, rankdir = "TB")
-SetEdgeStyle(root, arrowhead = "vee", color = "grey35", penwidth = 2)
-SetNodeStyle(root, style = "filled,rounded", shape = "box", 
+        tree_data$left_daughter[is.na(tree_data$left_daughter)] <- 0
+        tree_data$right_daughter[is.na(tree_data$right_daughter)] <- 0
+        tree_plot<- build_tree(tree_data)
+    }else if (tree_from =="randomForest"){
+        tree_plot<- build_tree(tree)
+    }
+    else{
+        stop("tree_from must be ranger or randomForest!")
+    }
+    return(tree_plot)
+}
+# test randomForest
+tree1 <-getTree(randomForest(iris[,-5], iris[,5], ntree=10), k=3, labelVar=TRUE)
+tree_randomForest <- main(tree1,tree_from="randomForest")
+SetGraphStyle(tree_randomForest, rankdir = "TB")
+SetEdgeStyle(tree_randomForest, arrowhead = "vee", color = "grey35", penwidth = 2)
+SetNodeStyle(tree_randomForest, style = "filled,rounded", shape = "box", 
             fontname = "helvetica", tooltip = GetDefaultTooltip)
-print(root)
-plot(root)
+print(tree_randomForest)
+plot(tree_randomForest)
+
+# test ranger
+tree2 <- treeInfo(ranger(Species ~ ., data = iris),tree=1)
+tree_ranger <- main(tree2,tree_from="ranger")
+SetGraphStyle(tree_ranger, rankdir = "TB")
+SetEdgeStyle(tree_ranger, arrowhead = "vee", color = "grey35", penwidth = 2)
+SetNodeStyle(tree_ranger, style = "filled,rounded", shape = "box", 
+            fontname = "helvetica", tooltip = GetDefaultTooltip)
+print(tree_ranger)
+plot(tree_ranger)
