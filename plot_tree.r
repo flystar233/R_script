@@ -7,7 +7,8 @@ collapse <- function(x){
 }
 
 build_tree <- function(df) {
-    
+    df$row <- as.numeric(rownames(df))
+    colnames(df)<-sapply(colnames(df),collapse)
     # 初始化一个空的列表来存储节点
     nodes <- vector("list", nrow(df))
     
@@ -37,9 +38,8 @@ build_tree <- function(df) {
 
 # test 
 tree <-getTree(randomForest(iris[,-5], iris[,5], ntree=10), 3, labelVar=TRUE)
-tree$row <- as.numeric(rownames(tree))
-colnames(tree)<-sapply(colnames(tree),collapse)
 root <- build_tree(tree)
+
 SetGraphStyle(root, rankdir = "TB")
 SetEdgeStyle(root, arrowhead = "vee", color = "grey35", penwidth = 2)
 SetNodeStyle(root, style = "filled,rounded", shape = "box", 
