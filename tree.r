@@ -1,175 +1,159 @@
-# 加载 dplyr 包
-library(dplyr)
-
-# 计算叶子节点值
-calc_leaf_value <- function(targets) {
-    label_counts <- table(targets)
-    major_label <- names(which.max(label_counts))
-    return(major_label)
-}
-
-# 计算基尼指数
-calc_gini <- function(left_targets, right_targets) {
-    split_gain <- 0
-    for (targets in list(left_targets, right_targets)) {
-        gini <- 1
-        label_counts <- table(targets)
-        for (key in names(label_counts)) {
-            prob <- label_counts[key] / length(targets)
-            gini <- gini - prob ^ 2
-        }
-        split_gain <- split_gain + (length(targets) / (length(left_targets) + length(right_targets))) * gini
+# 主函数：构建决策树
+build_decision_tree <- function(X, y, max_depth = Inf, min_samples_split = 2, min_samples_leaf = 1) {
+  data <- cbind(X, y)
+  features <- colnames(X)
+  target <- colnames(y)[1]
+  
+  build_tree_recursive <- function(data, depth = 0) {
+    # 检查停止条件
+    if (nrow(data) < min_samples_split || depth == max_depth || length(unique(data[[target]])) == 1 || nrow(data) <= min_samples_leaf * 2) {
+      return(list(
+        type = "leaf",
+        class = names(which.max(table(data[[target]]))),
+        prob = max(table(data[[target]])) / nrow(data),
+        samples = nrow(data)
+      ))
     }
-    return(split_gain)
-}
-
-# 划分数据集
-split_dataset <- function(dataset, targets, split_feature, split_value) {
-    left_dataset <- dataset |> filter(!!sym(split_feature) <= split_value)
-    left_targets <- targets[dataset |> pull(split_feature) <= split_value]
-    right_dataset <- dataset |> filter(!!sym(split_feature) > split_value)
-    right_targets <- targets[dataset |> pull(split_feature) > split_value]
-    return(list(left_dataset = left_dataset, right_dataset = right_dataset,
-                left_targets = left_targets, right_targets = right_targets))
-}
-
-# 选择最佳特征
-choose_best_feature <- function(dataset, targets) {
-    best_split_gain <- 1
-    best_split_feature <- NULL
-    best_split_value <- NULL
-    for (feature in colnames(dataset)) {
-        if (length(unique(dataset |> pull(feature))) <= 100) {
-            unique_values <- sort(unique(dataset |> pull(feature)))
-        } else {
-            unique_values <- unique(sapply(seq(0, 100, by = 1), function(x) {
-                quantile(dataset |> pull(feature), x / 100)
-            }))
-        }
-        for (split_value in unique_values) {
-            print(split_value)
-            left_targets <- targets[dataset |> pull(feature) <= split_value,]
-            print(left_targets)
-            right_targets <- targets[dataset |> pull(feature) > split_value,]
-            print(right_targets)
-            split_gain <- calc_gini(left_targets, right_targets)
-            if (split_gain < best_split_gain) {
-                best_split_feature <- feature
-                best_split_value <- split_value
-                best_split_gain <- split_gain
-            }
-        }
+    
+    # 寻找最佳分割
+    best_split <- find_best_split(data, features, target, min_samples_leaf)
+    
+    if (is.null(best_split)) {
+      return(list(
+        type = "leaf",
+        class = names(which.max(table(data[[target]]))),
+        prob = max(table(data[[target]])) / nrow(data),
+        samples = nrow(data)
+      ))
     }
-    return(list(best_split_feature = best_split_feature, best_split_value = split_value,
-                best_split_gain = best_split_gain))
+    
+    # 分割数据
+    left_data <- data[data[[best_split$feature]] <= best_split$value, ]
+    right_data <- data[data[[best_split$feature]] > best_split$value, ]
+    
+    # 递归构建左右子树
+    left_branch <- build_tree_recursive(left_data, depth + 1)
+    right_branch <- build_tree_recursive(right_data, depth + 1)
+    
+    # 返回节点信息
+    return(list(
+      type = "node",
+      feature = best_split$feature,
+      value = best_split$value,
+      gini = best_split$gini,
+      samples = nrow(data),
+      left = left_branch,
+      right = right_branch
+    ))
+  }
+  
+  return(build_tree_recursive(data))
 }
 
-# 构建单棵决策树
-build_single_tree <- function(dataset, targets, depth, max_depth, min_samples_split, min_samples_leaf,
-                              min_split_gain, feature_importances) {
-    if (n_distinct((targets)) <= 1 || nrow(dataset) <= min_samples_split) {
-        leaf_value <- calc_leaf_value(targets)
-        return(list(split_feature = NULL, split_value = NULL, leaf_value = leaf_value,
-                    tree_left = NULL, tree_right = NULL))
-    }
-    if (depth < max_depth) {
-        best_split <- choose_best_feature(dataset, targets)
-        best_split_feature <- best_split$best_split_feature
-        best_split_value <- best_split$best_split_value
-        best_split_gain <- best_split$best_split_gain
-        split_res <- split_dataset(dataset, targets, best_split_feature, best_split_value)
-        left_dataset <- split_res$left_dataset
-        right_dataset <- split_res$right_dataset
-        left_targets <- split_res$left_targets
-        right_targets <- split_res$right_targets
-        if (nrow(left_dataset) <= min_samples_leaf ||
-            nrow(right_dataset) <= min_samples_leaf ||
-            best_split_gain <= min_split_gain) {
-            leaf_value <- calc_leaf_value(targets)
-            return(list(split_feature = NULL, split_value = NULL, leaf_value = leaf_value,
-                        tree_left = NULL, tree_right = NULL))
-        } else {
-            if (is.null(feature_importances[best_split_feature])) {
-                feature_importances[best_split_feature] <- 1
-            } else {
-                feature_importances[best_split_feature] <- feature_importances[best_split_feature] + 1
-            }
-            tree_left <- build_single_tree(left_dataset, left_targets, depth + 1, max_depth, min_samples_split,
-                                           min_samples_leaf, min_split_gain, feature_importances)
-            tree_right <- build_single_tree(right_dataset, right_targets, depth + 1, max_depth, min_samples_split,
-                                            min_samples_leaf, min_split_gain, feature_importances)
-            return(list(split_feature = best_split_feature, split_value = best_split_value,
-                        leaf_value = NULL, tree_left = tree_left, tree_right = tree_right))
+# 辅助函数：寻找最佳分割点
+find_best_split <- function(data, features, target, min_samples_leaf) {
+  best_gini <- Inf
+  best_split <- NULL
+  
+  for (feature in features) {
+    if (is.numeric(data[[feature]])) {
+      # 对连续变量进行排序并找到中点
+      sorted_values <- sort(unique(data[[feature]]))
+      split_points <- (sorted_values[-1] + sorted_values[-length(sorted_values)]) / 2
+      
+      for (split in split_points) {
+        left <- data[[target]][data[[feature]] <= split]
+        right <- data[[target]][data[[feature]] > split]
+        
+        # 检查分割后的子节点是否满足最小样本数要求
+        if (length(left) < min_samples_leaf || length(right) < min_samples_leaf) {
+          next
         }
+        
+        gini <- (length(left) * calculate_gini(left) + length(right) * calculate_gini(right)) / nrow(data)
+        
+        if (gini < best_gini) {
+          best_gini <- gini
+          best_split <- list(feature = feature, value = split, gini = gini)
+        }
+      }
     } else {
-        leaf_value <- calc_leaf_value(targets)
-        return(list(split_feature = NULL, split_value = NULL, leaf_value = leaf_value,
-                    tree_left = NULL, tree_right = NULL))
+      # 对分类变量，考虑所有可能的二分法
+      levels <- unique(data[[feature]])
+      for (level in levels) {
+        left <- data[[target]][data[[feature]] == level]
+        right <- data[[target]][data[[feature]] != level]
+        
+        # 检查分割后的子节点是否满足最小样本数要求
+        if (length(left) < min_samples_leaf || length(right) < min_samples_leaf) {
+          next
+        }
+        
+        gini <- (length(left) * calculate_gini(left) + length(right) * calculate_gini(right)) / nrow(data)
+        
+        if (gini < best_gini) {
+          best_gini <- gini
+          best_split <- list(feature = feature, value = level, gini = gini)
+        }
+      }
     }
+  }
+  
+  return(best_split)
 }
 
-# 并行构建树的辅助函数
-parallel_build_trees <- function(dataset, targets, random_state, max_depth, min_samples_split,
-                                 min_samples_leaf, min_split_gain, colsample_bytree, subsample) {
-    set.seed(random_state)
-    subcol_index <- sample(colnames(dataset), colsample_bytree)
-    set.seed(random_state)
-    random_sample <- sample(1:nrow(dataset), size = floor(subsample * nrow(dataset)), replace = TRUE)
-    dataset_stage <- dataset |> slice(random_sample) |> select(all_of(subcol_index))
-    targets_stage <- targets|> slice(random_sample)
-    feature_importances <- list()
-    tree <- build_single_tree(dataset_stage, targets_stage, 0, max_depth, min_samples_split, min_samples_leaf,
-                              min_split_gain, feature_importances)
-    return(tree)
+# 辅助函数：计算基尼不纯度
+calculate_gini <- function(y) {
+  if (length(y) == 0) return(0)
+  p <- table(y) / length(y)
+  return(1 - sum(p^2))
 }
 
-# 随机森林训练
-random_forest_fit <- function(dataset, targets, n_estimators, max_depth, min_samples_split, min_samples_leaf,
-                              min_split_gain, colsample_bytree, subsample, random_state) {
-    if (n_distinct(targets)!= 2) {
-        stop("There must be two classes for targets!")
-    }
-    if (!is.null(random_state)) {
-        set.seed(random_state)
-    }
-    random_state_stages <- sample(1:n_estimators, n_estimators)
-    if (colsample_bytree == "sqrt") {
-        colsample_bytree <- floor(sqrt(ncol(dataset)))
-    } else if (colsample_bytree == "log2") {
-        colsample_bytree <- floor(log(ncol(dataset)))
-    } else {
-        colsample_bytree <- ncol(dataset)
-    }
-    trees <- lapply(random_state_stages, function(random_state) {
-        parallel_build_trees(dataset, targets, random_state, max_depth, min_samples_split, min_samples_leaf,
-                             min_split_gain, colsample_bytree, subsample)
-    })
-    return(trees)
+# 打印决策树结构
+print_tree <- function(tree, indent = "") {
+  if (tree$type == "leaf") {
+    cat(sprintf("%sLeaf: class = %s, probability = %.2f, samples = %d\n", 
+                indent, tree$class, tree$prob, tree$samples))
+  } else {
+    cat(sprintf("%sNode: feature = %s, split value = %.2f, gini = %.4f, samples = %d\n", 
+                indent, tree$feature, tree$value, tree$gini, tree$samples))
+    cat(sprintf("%sLeft branch:\n", indent))
+    print_tree(tree$left, paste0(indent, "  "))
+    cat(sprintf("%sRight branch:\n", indent))
+    print_tree(tree$right, paste0(indent, "  "))
+  }
 }
 
 # 预测函数
-predict <- function(dataset, trees) {
-    res <- list()
-    for (i in 1:nrow(dataset)) {
-        row <- dataset[i, ]
-        pred_list <- list()
-        for (tree in trees) {
-            pred_list <- c(pred_list, get_predict_value(row, tree))
-        }
-        pred_label_counts <- table(pred_list)
-        pred_label <- names(which.max(pred_label_counts))
-        res <- c(res, pred_label)
+predict_tree <- function(tree, new_data) {
+  if (tree$type == "leaf") {
+    return(tree$class)
+  }
+  
+  if (is.numeric(new_data[[tree$feature]])) {
+    if (new_data[[tree$feature]] <= tree$value) {
+      return(predict_tree(tree$left, new_data))
+    } else {
+      return(predict_tree(tree$right, new_data))
     }
-    return(unlist(res))
+  } else {
+    if (new_data[[tree$feature]] == tree$value) {
+      return(predict_tree(tree$left, new_data))
+    } else {
+      return(predict_tree(tree$right, new_data))
+    }
+  }
 }
 
-# 辅助函数，用于递归计算预测值
-get_predict_value <- function(row, tree) {
-    if (!is.null(tree$leaf_value)) {
-        return(tree$leaf_value)
-    } else if (row[tree$split_feature] <= tree$split_value) {
-        return(get_predict_value(row, tree$tree_left))
-    } else {
-        return(get_predict_value(row, tree$tree_right))
-    }
-}
+# 使用示例
+# X <- data.frame(feature1 = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+#                 feature2 = c("A", "B", "A", "B", "A", "B", "A", "B", "A", "B"),
+#                 feature3 = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0))
+# y <- data.frame(target = c("Yes", "No", "Yes", "No", "Yes", "No", "Yes", "No", "Yes", "No"))
+# tree <- build_decision_tree(X, y, max_depth = 3, min_samples_split = 2, min_samples_leaf = 2)
+# print_tree(tree)
+# 
+# # 预测新数据
+# new_data <- data.frame(feature1 = 5.5, feature2 = "B", feature3 = 0.55)
+# prediction <- predict_tree(tree, new_data)
+# print(paste("Prediction:", prediction))
