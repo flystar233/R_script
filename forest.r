@@ -105,6 +105,10 @@ predict_random_forest <- function(forest, new_data) {
 
 # 计算随机森林的预测准确率
 calculate_accuracy <- function(forest, X_test, y_test) {
+  if(!is.data.frame(y_test)){
+    y_test <- as.data.frame(y_test)
+    colnames(y_test) <- "target"
+  }
   predictions <- predict_random_forest(forest, X_test)
   accuracy <- sum(predictions == y_test) / nrow(y_test)
   return(accuracy)
